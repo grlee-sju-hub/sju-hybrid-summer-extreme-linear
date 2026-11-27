@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Direct hybrid verify of the FIXED 09-1 ALL k3 models (no re-selection): L0 predictor -> C3S MME at predict time.
-Two training protocols, both eval on 1993-2024 (C3S overlap):
-  A) 1993-train : fit & LOO within 1993-2024 (detrend over 1993-2024). [apples-to-apples, keep]
-  B) 1979-train : fit beta on 1979-2024 observed (LOO leaves out the eval year -> 45yr fit); predict 1993-2024.
-     L0 C3S calibrated to observed-L0 distribution over the 1993-2024 overlap (mean+std match; period scales differ).
-Lead terms always observed; coeffs always fit on OBSERVED. Out: console + data/mlr_pp_fixed_era5.csv."""
+"""Hybrid forecast of JA CDHD from the two concurrent (L0) track-A predictors:
+   t2mna = JA 2-m temperature, tropical North Atlantic;  v10io = JA 10-m meridional wind, eastern Indian Ocean.
+Both predictors are concurrent (L0), so at forecast time they are supplied by the C3S multi-model-ensemble
+(MME) forecast, calibrated to the observed distribution. Two protocols, evaluated over the C3S hindcast
+overlap 1993-2016:
+  A) 1993-train : fit & leave-one-out within 1993-2016.
+  B) 1979-train : fit beta on observed 1979-2024 (LOO 45-yr fits); predict 1993-2016 from the calibrated C3S MME.
+Out: console + data/cdhd_trackA_hybrid.csv."""
 import numpy as np, pandas as pd, xarray as xr
 from pathlib import Path
 D=Path("data")
@@ -15,42 +17,39 @@ def pploo(Xf,Xp,y):
     XtXi=np.linalg.inv(Xf.T@Xf); beta=XtXi@(Xf.T@y); e=y-Xf@beta
     h=np.einsum("ij,jk,ik->i",Xf,XtXi,Xf); cross=np.einsum("ij,jk,ik->i",Xp,XtXi,Xf)
     yloo=Xp@beta-cross*e/(1-h); return corr(yloo,y)
-def pred_series(name):
-    if name=="EC_day": d=xr.open_dataset(D/"ERA5_DJF_EC_index_1979-2024.nc"); y=d.year.values.astype(int); v=d.korea_nday.values.astype(float); d.close()
-    elif name=="EW_day": d=xr.open_dataset(D/"ERA5_DJF_EW_index_1979-2024.nc"); y=d.year.values.astype(int); v=d.korea_nday.values.astype(float); d.close()
-    elif name=="CDHD":
-        d=xr.open_dataset(D/"ERA5_JA_CDHD_index_1979-2024.nc"); y=d.year.values.astype(int); v=d.korea_nday.values.astype(float); d.close()
-    return {int(a):float(b) for a,b in zip(y,v)}
-d=np.load(D/"predictor_accepted_era5.npz",allow_pickle=True)
-G=d["gid"].astype(int); OBS=d["obs_ts"]; LEAD=d["lead"].astype(int); OBSy={int(y):i for i,y in enumerate(d["years"].astype(int))}
-gi={int(g):i for i,g in enumerate(G)}
-mme=pd.read_csv(D/"c3s_L0_mme_ts_era5.csv"); MME={}
-for _,r in mme.iterrows(): MME.setdefault(int(r.gid),{})[int(r.year)]=float(r.mme_anom)
-MODELS={"EC_day":[10,191,132],"EW_day":[218,313,265],"CDHD":[500,479,682]}
-Y46=np.arange(1979,2025); E93=np.arange(1993,2025)
-rows=[]
-for nm,gids in MODELS.items():
-    ym=pred_series(nm); L0=[g for g in gids if LEAD[gi[g]]==0]
-    # ---- A) 1993-train ----
-    i93=[OBSy[Y] for Y in E93]; yA=detr(np.array([ym[Y] for Y in E93]))
-    Xo=np.column_stack([np.ones(len(E93))]+[detr(OBS[gi[g]][i93]) for g in gids])
-    Xh=np.column_stack([np.ones(len(E93))]+[(detr(np.array([MME[g][Y] for Y in E93])) if g in L0 else detr(OBS[gi[g]][i93])) for g in gids])
-    accA_obs=pploo(Xo,Xo,yA); accA_hyb=pploo(Xo,Xh,yA)
-    # ---- B) 1979-train, predict 1993-2024 (explicit LOO) ----
-    y46=detr(np.array([ym[Y] for Y in Y46])); Xf46={g:detr(OBS[gi[g]][[OBSy[Y] for Y in Y46]]) for g in gids}
-    pos={int(Y):k for k,Y in enumerate(Y46)}
-    cal={}
-    for g in L0:                                   # calibrate C3S -> obs-L0 distribution over overlap
-        oL0=np.array([Xf46[g][pos[Y]] for Y in E93]); c=np.array([MME[g][Y] for Y in E93])
-        cc=(c-c.mean())/c.std()*oL0.std()+oL0.mean(); cal[g]={int(Y):cc[k] for k,Y in enumerate(E93)}
-    yo=[]; yh=[]; yt=[]
-    for Y in E93:
-        tr=Y46!=Y; Xtr=np.column_stack([np.ones(tr.sum())]+[Xf46[g][tr] for g in gids]); beta=np.linalg.lstsq(Xtr,y46[tr],rcond=None)[0]
-        iY=pos[Y]; xo=np.array([1.0]+[Xf46[g][iY] for g in gids]); xh=np.array([1.0]+[(cal[g][Y] if g in L0 else Xf46[g][iY]) for g in gids])
-        yo.append(xo@beta); yh.append(xh@beta); yt.append(y46[iY])
-    accB_obs=corr(yo,yt); accB_hyb=corr(yh,yt)
-    rows.append(dict(index=nm,nL0=len(L0),
-        A_obs93=round(accA_obs,3),A_hyb93_C3S=round(accA_hyb,3),
-        B_obs_tr79=round(accB_obs,3),B_hyb_tr79_C3S=round(accB_hyb,3)))
-res=pd.DataFrame(rows); print(res.to_string(index=False),flush=True); res.to_csv(D/"mlr_pp_fixed_era5.csv",index=False)
-print("[saved] mlr_pp_fixed_era5.csv  (eval 1993-2024; A=train93, B=train79)",flush=True)
+Y46=np.arange(1979,2025); E93=np.arange(1993,2017); pos={int(Y):k for k,Y in enumerate(Y46)}; PREDN=["t2mna","v10io"]
+
+# predictand: CDHD (Korea-mean series)
+d=xr.open_dataset(D/"ERA5_JA_CDHD_index_1979-2024.nc"); yc=d.year.values.astype(int); cd=d.korea_nday.values.astype(float); d.close()
+ym={int(a):float(b) for a,b in zip(yc,cd)}
+# observed track-A predictor indices (JA box means)
+ta=pd.read_csv(D/"era5_JA_trackA_predictors_1979-2024.csv").set_index("year")
+OBS={p:ta.reindex(Y46)[p].values.astype(float) for p in PREDN}
+# C3S MME forecast of the L0 predictors (year -> value)
+mme=pd.read_csv(D/"c3s_mme_L0_ja.csv").set_index("year")
+MME={p:{int(Y):float(mme.loc[Y,p]) for Y in mme.index} for p in PREDN}
+
+# ---- A) 1993-train : fit & LOO within 1993-2016 ----
+i93=[pos[Y] for Y in E93]; yA=detr(np.array([ym[Y] for Y in E93]))
+Xo=np.column_stack([np.ones(len(E93))]+[detr(OBS[p][i93]) for p in PREDN])
+Xh=np.column_stack([np.ones(len(E93))]+[detr(np.array([MME[p][Y] for Y in E93])) for p in PREDN])
+accA_obs=pploo(Xo,Xo,yA); accA_hyb=pploo(Xo,Xh,yA)
+
+# ---- B) 1979-train, predict 1993-2016 (explicit LOO; C3S calibrated to observed-L0 distribution) ----
+y46=detr(np.array([ym[Y] for Y in Y46])); Xf46={p:detr(OBS[p]) for p in PREDN}
+cal={}
+for p in PREDN:
+    oL0=np.array([Xf46[p][pos[Y]] for Y in E93]); c=np.array([MME[p][Y] for Y in E93])
+    cc=(c-c.mean())/c.std()*oL0.std()+oL0.mean(); cal[p]={int(Y):cc[k] for k,Y in enumerate(E93)}
+yo=[]; yh=[]; yt=[]
+for Y in E93:
+    tr=Y46!=Y; Xtr=np.column_stack([np.ones(tr.sum())]+[Xf46[p][tr] for p in PREDN]); beta=np.linalg.lstsq(Xtr,y46[tr],rcond=None)[0]
+    iY=pos[Y]; xo=np.array([1.0]+[Xf46[p][iY] for p in PREDN]); xh=np.array([1.0]+[cal[p][Y] for p in PREDN])
+    yo.append(xo@beta); yh.append(xh@beta); yt.append(y46[iY])
+accB_obs=corr(yo,yt); accB_hyb=corr(yh,yt)
+
+res=pd.DataFrame([dict(index="CDHD", predictors="t2mna+v10io (track A, L0)",
+    A_obs93=round(accA_obs,3), A_hyb93_C3S=round(accA_hyb,3),
+    B_obs_tr79=round(accB_obs,3), B_hyb_tr79_C3S=round(accB_hyb,3))])
+print(res.to_string(index=False),flush=True); res.to_csv(D/"cdhd_trackA_hybrid.csv",index=False)
+print("[saved] cdhd_trackA_hybrid.csv  (CDHD track-A hybrid, eval 1993-2016)",flush=True)
