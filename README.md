@@ -40,9 +40,15 @@ The relationship sign (±) is preserved. The mask is segmented into coherent reg
 
 ## Selected predictors (final CDHD model)
 
-- June precipitation over the Korean Peninsula (L1) · June 2-m temperature over the North Atlantic (L1) · April precipitation over the Arctic (L3)
+Final MLR predictors. Coefficients (**β**) are standardised (z-scored, detrended predictors; fit over 1979–2024). Leads are months before the July–August target (L1 = June, L3 = April).
 
-The dominant predictor is **early-summer (June) Korean precipitation** (negative relationship: drier June → higher compound hot–dry risk).
+| predictor | lead | variable | region | β (std.) |
+|---|---|---|---|---|
+| α | L1 (Jun) | precipitation | Korea / East Sea (≈37°N, 132°E) | −0.63 |
+| β | L1 (Jun) | 2-m temperature | subtropical NE Atlantic (≈31°N, 18°W) | −0.20 |
+| γ | L3 (Apr) | precipitation | Arctic / Beaufort Sea (≈72°N, 131°W) | −0.58 |
+
+The dominant predictor is **early-summer (June) Korean precipitation** (negative: a drier June favours higher compound hot–dry risk).
 
 ## Repository structure
 
