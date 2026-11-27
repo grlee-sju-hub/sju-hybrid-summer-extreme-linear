@@ -13,8 +13,20 @@ Pure dynamical models have limited skill for regional seasonal extremes, while p
 - **Predictand:** JA compound hot–dry index **CDHD** over Korea, combining heatwave intensity and drought:
   `CDHD = ( log1p(HWD) / σ ) × ( − SPEI3 )`,
   where `HWD` = Korean heatwave-day count and `SPEI3` = standardized precipitation–evapotranspiration index.
-- **Predictors:** teleconnection indices at seasonal lead; the final CDHD model is **lead-based** (observed early-summer precursors; no concurrent dynamical term was selected).
+- **Predictors:** two **concurrent (L0, July–August) large-scale drivers** that the dynamical multi-model ensemble forecasts skilfully — tropical **North-Atlantic 2-m temperature** and eastern **Indian-Ocean 10-m meridional wind** (the "track-A" concurrent pair).
 - **Estimator:** multiple linear regression (this repo). The non-linear (CatBoost) counterpart is in a sibling repository.
+
+## How CDHD is computed
+
+**CDHD** (compound hot–dry) merges summer heat and drought into a single index:
+
+```
+CDHD = ( log1p(HWD) / σ_logHWD ) × ( −SPEI3 )
+```
+
+- **HWD — heatwave-day count.** From ERA5 daily maximum temperature: at each grid cell the day-of-year 90th percentile is taken over the 1981–2010 base period with a ±7-day window, and a heatwave day is tmax exceeding that threshold on ≥3 consecutive days. HWD is the July–August count, cos-latitude-weighted over the Korea box (32.5–45°N, 122.5–132.5°E). `log1p(HWD)` compresses the right-skewed count and is divided by its 1979–2024 standard deviation (`σ_logHWD`).
+- **SPEI3 — drought.** The 3-month Standardized Precipitation–Evapotranspiration Index for July–August over Korea (SPEIbase v2.11), normalized over 1979–2024. SPEI3 < 0 under drought, so **−SPEI3** is the drought magnitude.
+- **Product.** Standardized heat × drought makes CDHD large only when a summer is **both hot and dry** — a hot-but-wet or cool-but-dry summer scores low. CDHD is defined on the Korea-mean series (one value per year, 1979–2024) and is distributed as the predictand file `ERA5_JA_CDHD_index_1979-2024.nc` (variable `korea_nday`).
 
 ## How the predictors are built
 
@@ -42,15 +54,14 @@ The relationship sign (±) is preserved. The mask is segmented into coherent reg
 
 ## Selected predictors (final CDHD model)
 
-Final MLR predictors. Coefficients (**β**) are standardised (z-scored, detrended predictors; fit over 1979–2024). Leads are months before the July–August target (L1 = June, L3 = April).
+The CDHD deliverable model (**track A**) uses two **concurrent (L0, July–August) large-scale drivers** that the dynamical multi-model ensemble forecasts skilfully, in place of lead-time precursors. Coefficients (**β**) are standardised (z-scored, detrended; fit over 1979–2024).
 
 | predictor | lead | variable | region | β (std.) |
 |---|---|---|---|---|
-| α | L1 (Jun) | precipitation | Korea / East Sea (≈37°N, 132°E) | −0.63 |
-| β | L1 (Jun) | 2-m temperature | subtropical NE Atlantic (≈31°N, 18°W) | −0.20 |
-| γ | L3 (Apr) | precipitation | Arctic / Beaufort Sea (≈72°N, 131°W) | −0.58 |
+| α | L0 (JA) | 2-m temperature | tropical North Atlantic (≈14.5°N, 44°W) | −0.40 |
+| β | L0 (JA) | 10-m meridional wind | eastern Indian Ocean / Bay of Bengal (≈9°N, 90°E) | +0.26 |
 
-The dominant predictor is **early-summer (June) Korean precipitation** (negative: a drier June favours higher compound hot–dry risk).
+A warm tropical North Atlantic and anomalous Indian-Ocean low-level southerlies favour a hot–dry Korean summer; leave-one-out cross-validated skill is ACC ≈ **0.45**. Both predictors are supplied operationally by the C3S multi-model-ensemble forecast.
 
 ## Repository structure
 
